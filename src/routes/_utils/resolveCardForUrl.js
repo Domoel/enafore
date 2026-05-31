@@ -25,6 +25,7 @@ export async function resolveCardForUrl (url, instanceName, accessToken) {
     return null
   }
 
+  // Step 1: ActivityPub resolution — Mastodon posts & accounts (no proxy needed)
   try {
     const results = await search(instanceName, accessToken, url, /* resolve */ true, /* limit */ 1)
 
@@ -34,7 +35,7 @@ export async function resolveCardForUrl (url, instanceName, accessToken) {
       const image = (status.media_attachments && status.media_attachments[0] && status.media_attachments[0].preview_url) ||
         account.avatar_static || null
       return {
-        url,
+        url: '/statuses/' + status.id,
         title: account.display_name || account.username,
         description: stripHTML(status.content).slice(0, 200) || null,
         image,
@@ -45,16 +46,33 @@ export async function resolveCardForUrl (url, instanceName, accessToken) {
     if (results.accounts && results.accounts[0]) {
       const account = results.accounts[0]
       return {
-        url,
+        url: '/accounts/' + account.id,
         title: account.display_name || account.username,
         description: stripHTML(account.note).slice(0, 150) || ('@' + account.acct),
         image: account.avatar_static || null,
         provider_name: hostname
       }
     }
-  } catch (e) { /* resolution failed, use text fallback */ }
+  } catch (e) { /* not an ActivityPub URL, continue */ }
 
-  // Text-only fallback: just the hostname
+  // Step 2: server-side OG fetch via our own /api/card-preview endpoint
+  try {
+    const resp = await fetch('/api/card-preview?url=' + encodeURIComponent(url))
+    if (resp.ok) {
+      const data = await resp.json()
+      if (data && data.title) {
+        return {
+          url,
+          title: data.title,
+          description: data.description || null,
+          image: data.image || data.favicon || null,
+          provider_name: data.siteName || hostname
+        }
+      }
+    }
+  } catch (e) { /* server endpoint unavailable */ }
+
+  // Step 3: text-only fallback — just the hostname
   return {
     url,
     title: hostname,

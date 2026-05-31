@@ -21,27 +21,28 @@ RUN pnpm install
 # Copy source
 COPY . .
 
-# Build application
+# Build application (sapper export → static files)
 RUN pnpm run build \
  && cp __sapper__/export/service-worker-index.html __sapper__/export/404.html
 
 # -----------------------------
 # Runtime Stage
 # -----------------------------
-FROM nginx:1.27-alpine
+FROM node:20-alpine
 
-# Copy nginx config
-COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+WORKDIR /app
 
-# Copy built app
-COPY --from=build /app/__sapper__/export /usr/share/nginx/html
+# Copy only what the server needs at runtime
+COPY --from=build /app/server.js ./server.js
+COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/__sapper__/export ./__sapper__/export
 
-# Expose port
-EXPOSE 80
+ENV NODE_ENV=production PORT=4002
 
-# Healthcheck (optional but useful)
+EXPOSE 4002
+
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget -qO- http://127.0.0.1/ >/dev/null || exit 1
+  CMD wget -qO- http://127.0.0.1:4002/ >/dev/null || exit 1
 
-# Start nginx
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["node", "server.js"]
